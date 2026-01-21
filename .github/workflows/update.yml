@@ -2,27 +2,33 @@ name: Update IP List
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Parte ogni notte a mezzanotte
-  workflow_dispatch:      # Ti permette di avviarlo a mano per testarlo
+    - cron: '0 0 * * *' # Runs every day at midnight UTC
+  workflow_dispatch:      # Allows manual trigger for testing
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Serve per permettere a GitHub di scrivere il file JSON nel repo
+      contents: write # Grants permission to push the updated JSON file back to the repo
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.x'
+
       - name: Install dependencies
         run: pip install requests
-      - name: Run script
+
+      - name: Run scraper script
         run: python scraper.py
-      - name: Save changes
+
+      - name: Save and push changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add bytedance_ips.json
-          git commit -m "Update ByteDance IPs" || exit 0
+          git commit -m "Auto-update ByteDance IP list" || exit 0
           git push
