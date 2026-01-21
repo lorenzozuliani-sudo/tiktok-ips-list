@@ -6,11 +6,14 @@ import socket
 import struct
 
 def ip_to_int(ip):
-    # Helper to convert IP string to integer for proper numerical sorting
-    return struct.unpack("!L", socket.inet_aton(ip))[0]
+    """Helper to convert IPv4 string to integer for proper numerical sorting."""
+    try:
+        return struct.unpack("!L", socket.inet_aton(ip))[0]
+    except socket.error:
+        return 0
 
 def scrape_and_update():
-    # All sources including the new ones provided by your colleague
+    # Sources including Udger, IPInfo, IP2Location, and the GitHub Gist
     urls = [
         "https://udger.com/resources/ua-list/bot-detail?bot=ByteDance+crawler",
         "https://ipinfo.io/AS138699",
@@ -24,41 +27,50 @@ def scrape_and_update():
     try:
         for url in urls:
             response = requests.get(url, headers=headers)
-            # Find both single IPs and CIDR ranges
-            found = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b', response.text)
+            # Find IPv4 addresses, IPv6 addresses, and CIDR ranges
+            # Updated regex to capture potential IPv6 entries as well
+            found = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b|(?:::[a-f0-9]+|[a-f0-9]+(?::[a-f0-9]*)+)(?:/\d{1,3})?\b', response.text, re.IGNORECASE)
             raw_entries.update(found)
 
-        # Separate CIDRs from single IPs to handle redundancy
-        cidrs = {e for e in raw_entries if '/' in e}
-        single_ips = {e for e in raw_entries if '/' not in e}
+        # Handle redundancy and separate versions
+        cidrs_v4 = {e for e in raw_entries if '/' in e and '.' in e}
+        single_ips_v4 = {e for e in raw_entries if '/' not in e and '.' in e}
+        ipv6_entries = {e for e in raw_entries if ':' in e}
 
-        # Remove single IPs that are already covered by a /24 range in the list
-        filtered_ips = set()
-        for ip in single_ips:
-            # Check if the first three octets + /24 exists in our cidr set
-            prefix = '.'.join(ip.split('.')[:3]) + '.0/24'
-            if prefix not in cidrs:
-                filtered_ips.add(ip)
+        # Remove single IPv4s covered by a /24 CIDR
+        filtered_v4 = set()
+        for ip in single_ips_v4:
+            prefix_check = '.'.join(ip.split('.')[:3]) + '.0/24'
+            if prefix_check not in cidrs_v4:
+                filtered_v4.add(ip)
 
-        # Combine and sort numerically
-        # We sort by the IP part (excluding the /mask) using the ip_to_int helper
-        combined = list(cidrs) + list(filtered_ips)
-        final_list = sorted(combined, key=lambda x: ip_to_int(x.split('/')[0]))
+        # Merge and sort IPv4 entries numerically
+        v4_combined = list(cidrs_v4) + list(filtered_v4)
+        v4_sorted = sorted(v4_combined, key=lambda x: ip_to_int(x.split('/')[0]))
+        
+        # Sort IPv6 entries alphabetically (standard for v6)
+        v6_sorted = sorted(list(ipv6_entries))
 
+        # Build prefixes list in Google format
+        prefixes = []
+        for entry in v4_sorted:
+            prefixes.append({"ipv4Prefix": entry if '/' in entry else f"{entry}/32"})
+        for entry in v6_sorted:
+            prefixes.append({"ipv6Prefix": entry if '/' in entry else f"{entry}/128"})
+
+        # Final Google-style output
         output = {
-            "bot_name": "ByteDance crawler",
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "total": len(final_list),
-            "ip_ranges_and_addresses": final_list
+            "creationTime": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000000"),
+            "prefixes": prefixes
         }
 
         with open('bytedance_ips.json', 'w') as f:
             json.dump(output, f, indent=4)
 
-        print(f"Update successful! Total unique entries: {len(final_list)}")
+        print(f"Update successful! Generated {len(prefixes)} prefixes.")
         
     except Exception as e:
-        print(f"Error during scraping: {e}")
+        print(f"Error: {e}")
         exit(1)
 
 if __name__ == "__main__":
